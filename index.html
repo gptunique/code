@@ -286,6 +286,9 @@
                 const firstSheetName = workbook.SheetNames[0];
                 const worksheet = workbook.Sheets[firstSheetName];
                 
+                // 원본 데이터 저장
+                const originalData = workbook;
+                
                 // 데이터를 JSON으로 변환
                 const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: null });
                 
@@ -401,7 +404,13 @@
                 }
                 
                 // 전역 변수에 처리된 데이터 저장
-                processedData = result;
+                processedData = {
+                    result,
+                    originalData: jsonData, // 원본 데이터 저장
+                    originalWorkbook: workbook, // 원본 워크북 저장
+                    productColumn,
+                    quantityColumn
+                };
                 
                 // 결과 표시
                 displayResults(result);
@@ -418,6 +427,7 @@
             // 요약 정보 표시
             const summaryContent = document.getElementById('summaryContent');
             let summaryHTML = `<p>총 ${result.details.length}개 제품 분류 완료</p>`;
+            summaryHTML += `<p>각 제품코드별 시트가 엑셀 내보내기시 자동으로 생성됩니다.</p>`;
             summaryContent.innerHTML = summaryHTML;
             
             // 제품 코드별 요약 표시
@@ -429,9 +439,12 @@
             
             for (const code of targetCodes) {
                 const data = result.summary[code];
+                // 통일된 풀네임 형식으로 제품코드 표시
+                const fullCodeName = `205089-${code}`;
+                
                 productSummaryHTML += `
                     <tr>
-                        <td><span class="product-code">${code}</span></td>
+                        <td><span class="product-code">${fullCodeName}</span></td>
                         <td>${data.count}</td>
                         <td>${data.totalQuantity}</td>
                     </tr>
@@ -456,9 +469,12 @@
             let detailHTML = '<table><thead><tr><th>제품 코드</th><th>제품명</th><th>수량</th></tr></thead><tbody>';
             
             for (const item of result.details) {
+                // 통일된 풀네임 형식으로 제품코드 표시
+                const fullCodeName = `205089-${item.code}`;
+                
                 detailHTML += `
                     <tr>
-                        <td><span class="product-code">${item.code}</span></td>
+                        <td><span class="product-code">${fullCodeName}</span></td>
                         <td>${item.productName}</td>
                         <td>${item.quantity}</td>
                     </tr>
@@ -482,19 +498,26 @@
                 // 새 워크북 생성
                 const wb = XLSX.utils.book_new();
                 
+                // 원본 데이터 시트 생성
+                const originalSheet = XLSX.utils.json_to_sheet(processedData.originalData);
+                XLSX.utils.book_append_sheet(wb, originalSheet, '원본데이터');
+                
                 // 요약 시트 생성
                 const summaryData = [];
                 for (const code of targetCodes) {
+                    // 통일된 풀네임 형식으로 제품코드 표시
+                    const fullCodeName = `205089-${code}`;
+                    
                     summaryData.push({
-                        '제품 코드': code,
-                        '주문 건수': processedData.summary[code].count,
-                        '총 수량': processedData.summary[code].totalQuantity
+                        '제품 코드': fullCodeName,
+                        '주문 건수': processedData.result.summary[code].count,
+                        '총 수량': processedData.result.summary[code].totalQuantity
                     });
                 }
                 
                 // 합계 추가
-                const totalOrders = targetCodes.reduce((sum, code) => sum + processedData.summary[code].count, 0);
-                const totalQuantity = targetCodes.reduce((sum, code) => sum + processedData.summary[code].totalQuantity, 0);
+                const totalOrders = targetCodes.reduce((sum, code) => sum + processedData.result.summary[code].count, 0);
+                const totalQuantity = targetCodes.reduce((sum, code) => sum + processedData.result.summary[code].totalQuantity, 0);
                 
                 summaryData.push({
                     '제품 코드': '합계',
@@ -503,8 +526,8 @@
                 });
                 
                 // 세부 정보 시트 생성
-                const detailsData = processedData.details.map(item => ({
-                    '제품 코드': item.code,
+                const detailsData = processedData.result.details.map(item => ({
+                    '제품 코드': `205089-${item.code}`,
                     '제품명': item.productName,
                     '수량': item.quantity
                 }));
@@ -516,16 +539,31 @@
                 const detailsSheet = XLSX.utils.json_to_sheet(detailsData);
                 XLSX.utils.book_append_sheet(wb, detailsSheet, '상세내역');
                 
+                // 각 제품 코드별 시트 생성
+                for (const code of targetCodes) {
+                    // 해당 코드가 포함된 항목 필터링
+                    const filteredData = processedData.originalData.filter(row => 
+                        row[processedData.productColumn] && 
+                        String(row[processedData.productColumn]).includes(code)
+                    );
+                    
+                    if (filteredData.length > 0) {
+                        // 각 코드별 시트 생성 (원본 형태 그대로)
+                        const codeSheet = XLSX.utils.json_to_sheet(filteredData);
+                        XLSX.utils.book_append_sheet(wb, codeSheet, code);
+                    }
+                }
+                
                 // 열 너비 조정
                 const summaryColWidth = [
-                    { wch: 10 }, // 제품 코드
+                    { wch: 15 }, // 제품 코드
                     { wch: 10 }, // 주문 건수
                     { wch: 10 }  // 총 수량
                 ];
                 summarySheet['!cols'] = summaryColWidth;
                 
                 const detailsColWidth = [
-                    { wch: 10 }, // 제품 코드
+                    { wch: 15 }, // 제품 코드
                     { wch: 50 }, // 제품명
                     { wch: 10 }  // 수량
                 ];

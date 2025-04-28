@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>민트마켓 주문 내역 자동 분류 툴</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <style>
+        body {
+            font-family: 'Malgun Gothic', 'Segoe UI', sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .upload-area {
+            border: 2px dashed #ddd;
+            border-radius: 10px;
+            padding: 30px;
+            text-align: center;
+            margin-bottom: 20px;
+            background-color: #f9f9f9;
+            transition: all 0.3s;
+        }
+        .upload-area:hover {
+            border-color: #aaa;
+            background-color: #f0f0f0;
+        }
+        .upload-area.highlight {
+            border-color: #4CAF50;
+            background-color: #e8f5e9;
+        }
+        #fileInput {
+            display: none;
+        }
+        .btn {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+        .btn:hover {
+            background-color: #388E3C;
+        }
+        .btn-secondary {
+            background-color: #2196F3;
+        }
+        .btn-secondary:hover {
+            background-color: #1976D2;
+        }
+        #results {
+            margin-top: 30px;
+        }
+        .result-section {
+            margin-bottom: 30px;
+        }
+        .result-section h3 {
+            color: #2c3e50;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 10px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        .summary-box {
+            background-color: #e8f5e9;
+            border: 1px solid #c8e6c9;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        .summary-box h4 {
+            margin-top: 0;
+            color: #2c3e50;
+        }
+        .progress-container {
+            width: 100%;
+            height: 20px;
+            background-color: #f3f3f3;
+            border-radius: 5px;
+            margin: 10px 0 20px;
+            overflow: hidden;
+        }
+        .progress-bar {
+            height: 100%;
+            width: 0%;
+            background-color: #4CAF50;
+            text-align: center;
+            line-height: 20px;
+            color: white;
+            transition: width 0.3s;
+        }
+        .product-code {
+            font-weight: bold;
+            color: #2196F3;
+        }
+        .hidden {
+            display: none;
+        }
+        .action-buttons {
+            margin: 20px 0;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>민트마켓 주문 내역 자동 분류 툴</h1>
+        
+        <div class="upload-area" id="dropArea">
+            <p>엑셀 파일을 이곳에 끌어다 놓거나</p>
+            <button class="btn" onclick="document.getElementById('fileInput').click()">파일 선택</button>
+            <input type="file" id="fileInput" accept=".xlsx,.xls" />
+            <p id="fileName"></p>
+        </div>
+        
+        <div class="progress-container hidden" id="progressContainer">
+            <div class="progress-bar" id="progressBar">0%</div>
+        </div>
+        
+        <div id="results" class="hidden">
+            <div class="summary-box">
+                <h4>분석 요약</h4>
+                <div id="summaryContent"></div>
+            </div>
+            
+            <div class="action-buttons">
+                <button class="btn" onclick="exportToExcel()">엑셀로 내보내기</button>
+                <button class="btn btn-secondary" onclick="resetApp()">새 파일 분석</button>
+            </div>
+            
+            <div class="result-section">
+                <h3>제품 코드별 요약</h3>
+                <div id="productSummary"></div>
+            </div>
+            
+            <div class="result-section">
+                <h3>상세 내역</h3>
+                <div id="detailContent"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 전역 변수
+        let processedData = null;
+        let originalFileName = '';
+        const targetCodes = ['1FN', '4CC', '066', '0A3', '126'];
+        
+        // 파일 입력 이벤트 설정
+        document.getElementById('fileInput').addEventListener('change', handleFileSelect);
+        
+        // 드래그 앤 드롭 이벤트 설정
+        const dropArea = document.getElementById('dropArea');
+        
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, preventDefaults, false);
+        });
+        
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+        
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropArea.addEventListener(eventName, highlight, false);
+        });
+        
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, unhighlight, false);
+        });
+        
+        function highlight() {
+            dropArea.classList.add('highlight');
+        }
+        
+        function unhighlight() {
+            dropArea.classList.remove('highlight');
+        }
+        
+        dropArea.addEventListener('drop', handleDrop, false);
+        
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            
+            if (files.length > 0) {
+                processFile(files[0]);
+            }
+        }
+        
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (file) {
+                processFile(file);
+            }
+        }
+        
+        function processFile(file) {
+            // 파일 이름 표시
+            originalFileName = file.name;
+            document.getElementById('fileName').textContent = `선택된 파일: ${file.name}`;
+            
+            // 진행 표시줄 표시
+            const progressContainer = document.getElementById('progressContainer');
+            const progressBar = document.getElementById('progressBar');
+            progressContainer.classList.remove('hidden');
+            
+            // 파일 읽기
+            const reader = new FileReader();
+            
+            reader.onprogress = function(event) {
+                if (event.lengthComputable) {
+                    const percentLoaded = Math.round((event.loaded / event.total) * 100);
+                    progressBar.style.width = percentLoaded + '%';
+                    progressBar.textContent = percentLoaded + '%';
+                }
+            };
+            
+            reader.onload = function(e) {
+                try {
+                    progressBar.style.width = '100%';
+                    progressBar.textContent = '처리 중...';
+                    
+                    // 타임아웃을 사용하여 UI 업데이트가 먼저 일어나도록 함
+                    setTimeout(() => {
+                        processExcelData(e.target.result);
+                    }, 100);
+                    
+                } catch (error) {
+                    alert('파일 처리 중 오류가 발생했습니다: ' + error.message);
+                    resetProgress();
+                }
+            };
+            
+            reader.onerror = function() {
+                alert('파일을 읽는 중 오류가 발생했습니다.');
+                resetProgress();
+            };
+            
+            reader.readAsArrayBuffer(file);
+        }
+        
+        function resetProgress() {
+            const progressContainer = document.getElementById('progressContainer');
+            const progressBar = document.getElementById('progressBar');
+            progressBar.style.width = '0%';
+            progressBar.textContent = '0%';
+            progressContainer.classList.add('hidden');
+        }
+        
+        function processExcelData(data) {
+            try {
+                // XLSX 라이브러리를 사용하여 엑셀 파일 파싱
+                const workbook = XLSX.read(data, { type: 'array' });
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                
+                // 데이터를 JSON으로 변환
+                const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: null });
+                
+                if (jsonData.length === 0) {
+                    throw new Error('데이터가 없습니다.');
+                }
+                
+                // 제품 코드 및 수량 컬럼 찾기
+                const columns = Object.keys(jsonData[0]);
+                let productColumn = null;
+                let quantityColumn = null;
+                
+                // 제품 코드 컬럼 찾기
+                for (const col of columns) {
+                    if (col.includes('상품') || col.includes('품목') || col.includes('제품') || 
+                        col.toLowerCase().includes('product') || col.toLowerCase().includes('item')) {
+                        // 이 컬럼에서 대상 코드 검색
+                        for (const code of targetCodes) {
+                            const found = jsonData.some(row => 
+                                row[col] && String(row[col]).includes(code)
+                            );
+                            if (found) {
+                                productColumn = col;
+                                break;
+                            }
+                        }
+                    }
+                    if (productColumn) break;
+                }
+                
+                // 제품 코드 컬럼을 찾지 못한 경우 모든 컬럼에서 검색
+                if (!productColumn) {
+                    for (const col of columns) {
+                        for (const code of targetCodes) {
+                            const found = jsonData.some(row => 
+                                row[col] && String(row[col]).includes(code)
+                            );
+                            if (found) {
+                                productColumn = col;
+                                break;
+                            }
+                        }
+                        if (productColumn) break;
+                    }
+                }
+                
+                // 수량 컬럼 찾기
+                for (const col of columns) {
+                    if (col.includes('수량') || col.includes('개수') || 
+                        col.toLowerCase().includes('quantity') || col.toLowerCase().includes('count')) {
+                        quantityColumn = col;
+                        break;
+                    }
+                }
+                
+                if (!productColumn) {
+                    throw new Error('제품 코드가 포함된 컬럼을 찾을 수 없습니다.');
+                }
+                
+                if (!quantityColumn) {
+                    // 수량 컬럼이 없으면 기본값 1로 설정
+                    jsonData.forEach(row => row['수량'] = 1);
+                    quantityColumn = '수량';
+                }
+                
+                // 제품 코드별 데이터 처리
+                const result = {
+                    summary: {},
+                    details: []
+                };
+                
+                for (const code of targetCodes) {
+                    const filteredData = jsonData.filter(row => 
+                        row[productColumn] && String(row[productColumn]).includes(code)
+                    );
+                    
+                    if (filteredData.length > 0) {
+                        // 총 수량 계산
+                        const totalQuantity = filteredData.reduce((sum, row) => 
+                            sum + (parseFloat(row[quantityColumn]) || 0), 0
+                        );
+                        
+                        // 제품별 그룹화
+                        const products = {};
+                        filteredData.forEach(row => {
+                            const productName = row[productColumn];
+                            if (!products[productName]) {
+                                products[productName] = 0;
+                            }
+                            products[productName] += parseFloat(row[quantityColumn]) || 0;
+                        });
+                        
+                        // 결과 저장
+                        result.summary[code] = {
+                            count: filteredData.length,
+                            totalQuantity: totalQuantity
+                        };
+                        
+                        // 세부 정보 저장
+                        for (const productName in products) {
+                            result.details.push({
+                                code: code,
+                                productName: productName,
+                                quantity: products[productName]
+                            });
+                        }
+                    } else {
+                        result.summary[code] = {
+                            count: 0,
+                            totalQuantity: 0
+                        };
+                    }
+                }
+                
+                // 전역 변수에 처리된 데이터 저장
+                processedData = result;
+                
+                // 결과 표시
+                displayResults(result);
+                
+            } catch (error) {
+                alert('데이터 처리 중 오류가 발생했습니다: ' + error.message);
+                console.error(error);
+            } finally {
+                resetProgress();
+            }
+        }
+        
+        function displayResults(result) {
+            // 요약 정보 표시
+            const summaryContent = document.getElementById('summaryContent');
+            let summaryHTML = `<p>총 ${result.details.length}개 제품 분류 완료</p>`;
+            summaryContent.innerHTML = summaryHTML;
+            
+            // 제품 코드별 요약 표시
+            const productSummary = document.getElementById('productSummary');
+            let productSummaryHTML = '<table><thead><tr><th>제품 코드</th><th>주문 건수</th><th>총 수량</th></tr></thead><tbody>';
+            
+            let totalOrders = 0;
+            let totalQuantity = 0;
+            
+            for (const code of targetCodes) {
+                const data = result.summary[code];
+                productSummaryHTML += `
+                    <tr>
+                        <td><span class="product-code">${code}</span></td>
+                        <td>${data.count}</td>
+                        <td>${data.totalQuantity}</td>
+                    </tr>
+                `;
+                totalOrders += data.count;
+                totalQuantity += data.totalQuantity;
+            }
+            
+            productSummaryHTML += `
+                <tr>
+                    <th>합계</th>
+                    <th>${totalOrders}</th>
+                    <th>${totalQuantity}</th>
+                </tr>
+            `;
+            
+            productSummaryHTML += '</tbody></table>';
+            productSummary.innerHTML = productSummaryHTML;
+            
+            // 상세 내역 표시
+            const detailContent = document.getElementById('detailContent');
+            let detailHTML = '<table><thead><tr><th>제품 코드</th><th>제품명</th><th>수량</th></tr></thead><tbody>';
+            
+            for (const item of result.details) {
+                detailHTML += `
+                    <tr>
+                        <td><span class="product-code">${item.code}</span></td>
+                        <td>${item.productName}</td>
+                        <td>${item.quantity}</td>
+                    </tr>
+                `;
+            }
+            
+            detailHTML += '</tbody></table>';
+            detailContent.innerHTML = detailHTML;
+            
+            // 결과 섹션 표시
+            document.getElementById('results').classList.remove('hidden');
+        }
+        
+        function exportToExcel() {
+            if (!processedData) {
+                alert('내보낼 데이터가 없습니다.');
+                return;
+            }
+            
+            try {
+                // 새 워크북 생성
+                const wb = XLSX.utils.book_new();
+                
+                // 요약 시트 생성
+                const summaryData = [];
+                for (const code of targetCodes) {
+                    summaryData.push({
+                        '제품 코드': code,
+                        '주문 건수': processedData.summary[code].count,
+                        '총 수량': processedData.summary[code].totalQuantity
+                    });
+                }
+                
+                // 합계 추가
+                const totalOrders = targetCodes.reduce((sum, code) => sum + processedData.summary[code].count, 0);
+                const totalQuantity = targetCodes.reduce((sum, code) => sum + processedData.summary[code].totalQuantity, 0);
+                
+                summaryData.push({
+                    '제품 코드': '합계',
+                    '주문 건수': totalOrders,
+                    '총 수량': totalQuantity
+                });
+                
+                // 세부 정보 시트 생성
+                const detailsData = processedData.details.map(item => ({
+                    '제품 코드': item.code,
+                    '제품명': item.productName,
+                    '수량': item.quantity
+                }));
+                
+                // 시트 추가
+                const summarySheet = XLSX.utils.json_to_sheet(summaryData);
+                XLSX.utils.book_append_sheet(wb, summarySheet, '요약');
+                
+                const detailsSheet = XLSX.utils.json_to_sheet(detailsData);
+                XLSX.utils.book_append_sheet(wb, detailsSheet, '상세내역');
+                
+                // 열 너비 조정
+                const summaryColWidth = [
+                    { wch: 10 }, // 제품 코드
+                    { wch: 10 }, // 주문 건수
+                    { wch: 10 }  // 총 수량
+                ];
+                summarySheet['!cols'] = summaryColWidth;
+                
+                const detailsColWidth = [
+                    { wch: 10 }, // 제품 코드
+                    { wch: 50 }, // 제품명
+                    { wch: 10 }  // 수량
+                ];
+                detailsSheet['!cols'] = detailsColWidth;
+                
+                // 파일 저장
+                const timestamp = new Date().toISOString().replace(/[:-]/g, '').substring(0, 14);
+                const filename = `민트마켓_제품분류결과_${timestamp}.xlsx`;
+                
+                XLSX.writeFile(wb, filename);
+                
+            } catch (error) {
+                alert('엑셀 파일 생성 중 오류가 발생했습니다: ' + error.message);
+                console.error(error);
+            }
+        }
+        
+        function resetApp() {
+            // 앱 상태 초기화
+            processedData = null;
+            originalFileName = '';
+            
+            // UI 초기화
+            document.getElementById('fileName').textContent = '';
+            document.getElementById('results').classList.add('hidden');
+            document.getElementById('fileInput').value = '';
+        }
+    </script>
+</body>
+</html>
